@@ -11,7 +11,8 @@ import viper.silicon.Config
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.interfaces.state._
 import viper.silicon.logger.records.data.{CommentRecord, SingleMergeRecord}
-import viper.silicon.resources.{NonQuantifiedPropertyInterpreter, Resources}
+import viper.silicon.resources.{NonQuantifiedPropertyInterpreter, PredicateID, Resources}
+import viper.silicon.Map
 import viper.silicon.state._
 import viper.silicon.state.terms._
 import viper.silicon.state.terms.perms._
@@ -31,6 +32,8 @@ trait StateConsolidationRules extends SymbolicExecutionRules {
 
   protected def assumeUpperPermissionBoundForQPFields(s: State, v: Verifier): State
   protected def assumeUpperPermissionBoundForQPFields(s: State, heaps: Seq[Heap], v: Verifier): State
+  protected def assumeUpperPermissionBoundForQPPredicates(s: State, v: Verifier): State
+  protected def assumeUpperPermissionBoundForQPPredicates(s: State, heaps: Seq[Heap], v: Verifier): State
 }
 
 /** Performs the minimal work necessary for any consolidator: merging two heaps combines the chunk
@@ -51,6 +54,10 @@ class MinimalStateConsolidator extends StateConsolidationRules {
   protected def assumeUpperPermissionBoundForQPFields(s: State, @unused v: Verifier): State = s
 
   protected def assumeUpperPermissionBoundForQPFields(s: State, @unused heaps: Seq[Heap], @unused v: Verifier): State = s
+
+  protected def assumeUpperPermissionBoundForQPPredicates(s: State, @unused v: Verifier): State = s
+
+  protected def assumeUpperPermissionBoundForQPPredicates(s: State, @unused heaps: Seq[Heap], @unused v: Verifier): State = s
 }
 
 /** Default implementation that merges as many known-alias chunks as possible, and deduces various
@@ -94,7 +101,7 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
         } while (continue)
 
 
-        val interpreter = new NonQuantifiedPropertyInterpreter(mergedChunks, v)
+        val interpreter = new NonQuantifiedPropertyInterpreter(mergedChunks, v, s)
 
         mergedChunks.filter(_.isInstanceOf[BasicChunk]) foreach { case ch: BasicChunk =>
           val resource = Resources.resourceDescriptions(ch.resourceID)
@@ -116,8 +123,9 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
                     reserveHeaps = mergedHeaps.tail)
 
     val s2 = assumeUpperPermissionBoundForQPFields(s1, v)
+    val s3 = assumeUpperPermissionBoundForQPPredicates(s2, v)
 
-    s2
+    s3
   }
 
   def consolidateOptionally(s: State, v: Verifier): State =
@@ -135,7 +143,7 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
 
     v.decider.assume(snapEqs, Option.when(withExp)(DebugExp.createInstance("Snapshot", isInternal_ = true)), enforceAssumption = false)
 
-    val interpreter = new NonQuantifiedPropertyInterpreter(mergedChunks, v)
+    val interpreter = new NonQuantifiedPropertyInterpreter(mergedChunks, v, s)
     newlyAddedChunks.filter(_.isInstanceOf[BasicChunk]) foreach { case ch: BasicChunk =>
       val resource = Resources.resourceDescriptions(ch.resourceID)
       val pathCond = interpreter.buildPathConditionsForChunk(ch, resource.instanceProperties)
@@ -199,7 +207,6 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
   private def mergeChunks(fr1: FunctionRecorder, chunk1: Chunk, chunk2: Chunk, v: Verifier): Option[(FunctionRecorder, Chunk, Term)] = (chunk1, chunk2) match {
     case (BasicChunk(rid1, id1, args1, args1Exp, snap1, perm1, perm1Exp), BasicChunk(_, _, _, _, snap2, perm2, perm2Exp)) =>
       val (fr2, combinedSnap, snapEq) = combineSnapshots(fr1, snap1, snap2, perm1, perm2, v)
-
       Some(fr2, BasicChunk(rid1, id1, args1, args1Exp, combinedSnap, PermPlus(perm1, perm2), perm1Exp.map(p1 => ast.PermAdd(p1, perm2Exp.get)())), snapEq)
     case (l@QuantifiedFieldChunk(id1, fvf1, condition1, condition1Exp,  perm1, perm1Exp, invs1, singletonRcvr1, singletonRcvr1Exp, hints1),
           r@QuantifiedFieldChunk(_, fvf2, _, _, perm2, perm2Exp, _, _, _, hints2)) =>
@@ -259,7 +266,7 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
       val receiver = `?r`
       val receiverExp = ast.LocalVarDecl(receiver.id.name, ast.Ref)()
       val args = Seq(receiver)
-      val chunksPerField: Map[String, Seq[QuantifiedFieldChunk]] = chunks.groupBy(_.id.name)
+      val chunksPerField: scala.collection.immutable.Map[String, Seq[QuantifiedFieldChunk]] = chunks.groupBy(_.id.name)
 
       /* Iterate over all fields f and effectively assume "forall x :: {x.f} perm(x.f) <= write"
          for each field. Nearly identical to what the evaluator does for perm(x.f) if f is
@@ -316,6 +323,86 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
         }
 
         sn
+      }
+    }
+  }
+
+  protected def assumeUpperPermissionBoundForQPPredicates(s: State, v: Verifier): State =
+    assumeUpperPermissionBoundForQPPredicates(s, s.h +: s.reserveHeaps, v)
+
+  protected def assumeUpperPermissionBoundForQPPredicates(s: State, heaps: Seq[Heap], v: Verifier): State = {
+    heaps.foldLeft(s) { case (si, heap) =>
+      val chunks: Seq[QuantifiedPredicateChunk] =
+        heap.values.collect({ case ch: QuantifiedPredicateChunk => ch }).to(Seq)
+
+      //val receiver = `?r`
+      //val receiverExp = ast.LocalVarDecl(receiver.id.name, ast.Ref)()
+      //val args = Seq(receiver)
+      val chunksPerPredicate: scala.collection.immutable.Map[String, Seq[QuantifiedPredicateChunk]] = chunks.groupBy(_.id.name)
+
+      /* Iterate over all predicates f with an upperbound and effectively assume "forall x :: f(x) perm(f(x)) <= upperBound"
+         for each field. */
+      chunksPerPredicate.foldLeft(si) { case (si, (predicateName, predicateChunks)) =>
+        val predicate = s.program.findPredicate(predicateName)
+        val predicateData = s.predicateData(predicate)
+        val formalVars = s.predicateFormalVarMap(predicate)
+        val formalVarExps = predicate.formalArgs
+        val upperBoundTerm = predicateData.upperBoundTerm
+        val upperBoundExp = predicateData.upperBoundExp
+        if(upperBoundTerm.isDefined) {
+          val (sn, smDef, pmDef) =
+            quantifiedChunkSupporter.heapSummarisingMaps(si, predicate, formalVars, predicateChunks, v)
+
+          if (sn.heapDependentTriggers.exists(r => r.isInstanceOf[ast.Predicate] && r.asInstanceOf[ast.Predicate].name == predicateName)) {
+            val trigger = PredicateTrigger(predicate.name, smDef.sm, formalVars)
+            val currentPermAmount = PredicatePermLookup(predicate.name, pmDef.pm, formalVars)
+            v.decider.prover.comment(s"Assume upper permission bound for predicate ${predicate.name}")
+
+            val debugExp = if (withExp) {
+              val permExp = ast.DebugLabelledOld(ast.CurrentPerm(ast.PredicateAccess(formalVarExps.map(v => v.localVar), predicateName)())(), v.getDebugOldLabel(sn))()
+              val exp = ast.Forall(formalVarExps, Seq(), ast.PermLeCmp(permExp, ast.FullPerm()())())()
+              Some(DebugExp.createInstance(exp, exp))
+            } else {
+              None
+            }
+            v.decider.assume(
+              Forall(formalVars, PermAtMost(currentPermAmount, upperBoundTerm.get), Trigger(trigger), "qp-pred-prm-bnd"), debugExp)
+          } else {
+            /*
+            If we don't use heap-dependent triggers, the trigger f(x) does not work. Instead, we assume the permission
+            bound explicitly for each singleton chunk receiver, and for each chunk, triggering on its inverse functions.
+            That is, we assume
+            forall r: Ref :: {inv(r)} perm(f(x)) <= upperBound
+             */
+            for (chunk <- predicateChunks) {
+              if (chunk.singletonArgs.isDefined){
+                val debugExp = if (withExp) {
+                  val permExp = ast.DebugLabelledOld(ast.CurrentPerm(ast.PredicateAccess(chunk.singletonArgExps.get, predicateName)())(), v.getDebugOldLabel(sn))()
+                  val exp = ast.PermLeCmp(permExp, upperBoundExp.get)()
+                  Some(DebugExp.createInstance(exp, exp))
+                } else { None }
+                v.decider.assume(PermAtMost(PredicatePermLookup(predicate.name, pmDef.pm, chunk.singletonArgs.get), upperBoundTerm.get), debugExp)
+              } else {
+                val chunkReceivers = chunk.invs.get.inverses.map(i => App(i, chunk.invs.get.additionalArguments ++ chunk.quantifiedVars))
+                val triggers = chunkReceivers.map(r => Trigger(r)).toSeq
+                val currentPermAmount = PredicatePermLookup(predicate.name, pmDef.pm, chunk.quantifiedVars)
+                v.decider.prover.comment(s"Assume upper permission bound for predicate ${predicate.name}")
+                val debugExp = if (withExp) {
+                  val chunkReceiverExp = chunk.quantifiedVarExps.get.map(v => v.localVar)
+                  var permExp: ast.Exp = ast.CurrentPerm(ast.PredicateAccess(chunkReceiverExp, predicateName)())()
+                  permExp = ast.DebugLabelledOld(permExp, v.getDebugOldLabel(sn))()
+                  val exp = ast.Forall(chunk.quantifiedVarExps.get, Seq(), ast.PermLeCmp(permExp, upperBoundExp.get)())()
+                  Some(DebugExp.createInstance(exp, exp))
+                } else { None }
+                v.decider.assume(
+                  Forall(chunk.quantifiedVars, PermAtMost(currentPermAmount, upperBoundTerm.get), triggers, "qp-pred-prm-bnd"), debugExp)
+              }
+
+            }
+          }
+          sn
+        } else
+          s
       }
     }
   }
@@ -390,6 +477,10 @@ class MinimalRetryingStateConsolidator(config: Config) extends RetryingStateCons
   override protected def assumeUpperPermissionBoundForQPFields(s: State, @unused v: Verifier): State = s
 
   override protected def assumeUpperPermissionBoundForQPFields(s: State, @unused heaps: Seq[Heap], @unused v: Verifier): State = s
+
+  override protected def assumeUpperPermissionBoundForQPPredicates(s: State, @unused v: Verifier): State = s
+
+  override protected def assumeUpperPermissionBoundForQPPredicates(s: State, @unused heaps: Seq[Heap], @unused v: Verifier): State = s
 }
 
 /** A variant of [[DefaultStateConsolidator]] that aims to work best when Silicon is run in

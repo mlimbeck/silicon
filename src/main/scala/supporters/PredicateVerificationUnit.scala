@@ -33,6 +33,15 @@ class PredicateData(predicate: ast.Predicate)
 
   val triggerFunction =
     Fun(Identifier(s"${predicate.name}%trigger"), sorts.Snap +: argumentSorts, sorts.Bool)
+
+  val upperBoundExp = {
+    predicate.upperBound match {
+      case Some(ub) => require(symbolConvert.toSort(ub.typ) == sorts.Perm, s"Permissions $ub must be of sort Perm, but found ${symbolConvert.toSort(ub.typ)}")
+      case None => ()
+    }
+    predicate.upperBound
+  }
+  var upperBoundTerm : Option[Term] = None
 }
 
 trait PredicateVerificationUnit
@@ -87,10 +96,12 @@ trait DefaultPredicateVerificationUnitProvider extends VerifierComponent { v: Ve
       openSymbExLogger(predicate)
 
       val ins = predicate.formalArgs.map(_.localVar)
-      val s = sInit.copy(g = Store(ins.map(x => (x, decider.fresh(x)))),
+      val ubVar = ast.LocalVar("limit", ast.Perm)()
+      val s = sInit.copy(g = Store(ins.map(x => (x, decider.fresh(x))) ++ Seq((ubVar, decider.fresh(ubVar)))),
                          h = Heap(),
                          oldHeaps = OldHeaps())
       val err = PredicateNotWellformed(predicate)
+      val ubErr = UpperBoundFailed(predicate)
 
       val result = predicate.body match {
         case None =>
@@ -98,11 +109,25 @@ trait DefaultPredicateVerificationUnitProvider extends VerifierComponent { v: Ve
         case Some(body) =>
           /*    locallyXXX {
                 magicWandSupporter.checkWandsAreSelfFraming(σ.γ, σ.h, predicate, c)}
-          &&*/  executionFlowController.locally(s, v)((s1, _) => {
-                  produce(s1, freshSnap, body, err, v)((_, _) =>
-                    Success())})
+          &&*/
+          executionFlowController.locally(s, v)((s1, _) => {
+          produce(s1, freshSnap, body, err, v)((s2, _) =>
+            Success())}) && executionFlowController.locally(s, v)((s1, _) => {
+            predicate.upperBound match {
+              case None =>
+                Success()
+              case Some(ubExp) =>
+                  val s3 = s1.scalePermissionFactor(s1.g(ubVar), s1.g.getExp(ubVar))
+                  produce(s3, freshSnap, ast.And(ast.PermGtCmp(ubVar, ubExp)(), body)(), ubErr, v)((_, _) =>
+                  v.decider.assert(terms.False) {
+                    case true =>
+                      Success()
+                    case false =>
+                      Failure(ubErr.dueTo(InvalidUpperBound(predicate)))
+                  })
+          }
+        })
       }
-
       symbExLog.closeMemberScope()
       Seq(result)
     }

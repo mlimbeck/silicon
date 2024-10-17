@@ -1102,7 +1102,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     val ch = quantifiedChunkSupporter.createSingletonQuantifiedChunk(formalQVars, formalQVarsExp, resource, tArgs, eArgs, tPerm, ePerm, sm, s.program)
     val (fr1, h1) = v.stateConsolidator(s).merge(s.functionRecorder, s, s.h, Heap(Seq(ch)), v)
 
-    val interpreter = new NonQuantifiedPropertyInterpreter(h1.values, v)
+    val interpreter = new NonQuantifiedPropertyInterpreter(h1.values, v, s)
     val resourceDescription = Resources.resourceDescriptions(ch.resourceID)
     val pcs = interpreter.buildPathConditionsForChunk(ch, resourceDescription.instanceProperties)
     pcs.foreach(p => v.decider.assume(p._1, Option.when(withExp)(DebugExp.createInstance(p._2, p._2))))

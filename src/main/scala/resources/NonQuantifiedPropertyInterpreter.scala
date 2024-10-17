@@ -9,12 +9,12 @@ package viper.silicon.resources
 import viper.silicon.Map
 import viper.silicon.interfaces.state._
 import viper.silicon.state.terms.Term
-import viper.silicon.state.{QuantifiedBasicChunk, terms}
+import viper.silicon.state.{QuantifiedBasicChunk, State, terms}
 import viper.silicon.utils.ast.{BigAnd, replaceVarsInExp}
 import viper.silicon.verifier.Verifier
 import viper.silver.ast
 
-class NonQuantifiedPropertyInterpreter(heap: Iterable[Chunk], verifier: Verifier) extends PropertyInterpreter {
+class NonQuantifiedPropertyInterpreter(heap: Iterable[Chunk], verifier: Verifier, state: State) extends PropertyInterpreter {
 
   protected case class Info(pm: Map[ChunkPlaceholder, GeneralChunk], resourceID: ResourceID) {
     def addMapping(cp: ChunkPlaceholder, ch: GeneralChunk) = Info(pm + (cp -> ch), resourceID)
@@ -111,6 +111,36 @@ class NonQuantifiedPropertyInterpreter(heap: Iterable[Chunk], verifier: Verifier
       case c: NonQuantifiedChunk => (c.args, c.argsExp)
       // TODO: remove once singleton quantified chunks are not used anymore
       case c: QuantifiedBasicChunk => (c.singletonArguments.get, Option.when(withExp)(c.singletonArgumentExps.get))
+    }
+  }
+
+  protected def buildPrHasUpperBound(chunkPlaceholder: ChunkPlaceholder, info: Info) = {
+    val chunk = info.pm(chunkPlaceholder)
+    val pred = state.program.findPredicate(chunk.id.toString)
+    if (state.predicateData(pred).upperBoundTerm.isDefined)
+      buildPathCondition(True(), info)
+    else
+      buildPathCondition(False(), info)
+  }
+
+  protected def buildUpperBoundAccess(chunkPlaceholder: ChunkPlaceholder, info: Info) = {
+    val chunk = info.pm(chunkPlaceholder)
+    val pred = state.program.findPredicate(chunk.id.toString)
+    val ubData = (state.predicateData(pred).upperBoundTerm, state.predicateData(pred).upperBoundExp)
+    require(ubData._1.isDefined)
+    chunk match {
+      case _: NonQuantifiedChunk =>
+        if(withExp)
+          (ubData._1.get, ubData._2)
+        else
+          (ubData._1.get, None)
+      // TODO: remove once singleton quantified chunks are not used anymore
+      case c: QuantifiedBasicChunk =>
+        val permTerm = ubData._1.get.replace(c.quantifiedVars, c.singletonArguments.get)
+        if (withExp)
+          (permTerm, Some(replaceVarsInExp(ubData._2.get, c.quantifiedVarExps.get.map(_.name), c.singletonArgumentExps.get)))
+        else
+          (permTerm, None)
     }
   }
 

@@ -9,7 +9,8 @@ package viper.silicon.rules
 import viper.silicon.debugger.DebugExp
 import viper.silicon.interfaces.state._
 import viper.silicon.interfaces.{Success, VerificationResult}
-import viper.silicon.resources.{NonQuantifiedPropertyInterpreter, Resources}
+import viper.silicon.resources.{NonQuantifiedPropertyInterpreter, PredicateID, Resources}
+import viper.silicon.Map
 import viper.silicon.state._
 import viper.silicon.state.terms._
 import viper.silicon.state.terms.perms.IsPositive
@@ -152,8 +153,8 @@ object chunkSupporter extends ChunkSupportRules {
 
     val consumeExact = terms.utils.consumeExactRead(perms, s.constrainableARPs)
 
-    def assumeProperties(chunk: NonQuantifiedChunk, heap: Heap): Unit = {
-      val interpreter = new NonQuantifiedPropertyInterpreter(heap.values, v)
+    def assumeProperties(chunk: NonQuantifiedChunk, heap: Heap, s: State): Unit = {
+      val interpreter = new NonQuantifiedPropertyInterpreter(heap.values, v, s)
       val resource = Resources.resourceDescriptions(chunk.resourceID)
       val pathCond = interpreter.buildPathConditionsForChunk(chunk, resource.instanceProperties)
       pathCond.foreach(p => v.decider.assume(p._1, Option.when(withExp)(DebugExp.createInstance(p._2, p._2))))
@@ -170,7 +171,7 @@ object chunkSupporter extends ChunkSupportRules {
           var newHeap = h - ch
           if (!v.decider.check(newChunk.perm === NoPerm, Verifier.config.checkTimeout())) {
             newHeap = newHeap + newChunk
-            assumeProperties(newChunk, newHeap)
+            assumeProperties(newChunk, newHeap, s)
           }
           val remainingExp = permsExp.map(pe => ast.PermSub(pe, toTakeExp.get)(pe.pos, pe.info, pe.errT))
           (ConsumptionResult(PermMinus(perms, toTake), remainingExp, Seq(), v, 0), s, newHeap, takenChunk)
@@ -182,7 +183,7 @@ object chunkSupporter extends ChunkSupportRules {
             val newChunk = ch.withPerm(PermMinus(ch.perm, perms), newPermExp)
             val takenChunk = ch.withPerm(perms, permsExp)
             val newHeap = h - ch + newChunk
-            assumeProperties(newChunk, newHeap)
+            assumeProperties(newChunk, newHeap, s)
             (Complete(), s, newHeap, Some(takenChunk))
           } else {
             (Incomplete(perms, permsExp), s, h, None)

@@ -354,7 +354,19 @@ object producer extends ProductionRules {
                 val formalArgs = s2.predicateFormalVarMap(predicate)
                 val trigger = (sm: Term) => PredicateTrigger(predicate.name, sm, tArgs)
                 quantifiedChunkSupporter.produceSingleLocation(
-                  s2, predicate, formalArgs, Option.when(withExp)(predicate.formalArgs), tArgs, eArgsNew, snap, gain, gainExp, trigger, v2)(Q)
+                  s2, predicate, formalArgs, Option.when(withExp)(predicate.formalArgs), tArgs, eArgsNew, snap, gain, gainExp, trigger, v2)((s3, v3) => {
+                val predData = s3.predicateData(predicate)
+                (predData.upperBoundExp, predData.upperBoundTerm) match {
+                  case (Some(ub), None) => eval(s3, ub, pve, v3)((s4a, tUb, eUbNew, v4a) => {
+                    permissionSupporter.assertNotNegative(s4a, tUb, ub, eUbNew, pve, v4a)((s5, v5) => {
+                      val tmp = s5.predicateData(predicate)
+                      tmp.upperBoundTerm = Some(tUb)
+                      Q(s5.copy(predicateData = s5.predicateData + (predicate -> tmp)), v5)
+                    })
+                  })
+                  case (_, _) => Q(s3, v3)
+                }
+                })
               } else {
                 val snap1 = snap.convert(sorts.Snap)
                 val ch = BasicChunk(PredicateID, BasicChunkIdentifier(predicate.name), tArgs, eArgsNew, snap1, gain, gainExp)
@@ -365,7 +377,18 @@ object producer extends ProductionRules {
                     val debugExp = Option.when(withExp)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($argsString))", isInternal_ = true))
                     v3.decider.assume(App(s3.predicateData(predicate).triggerFunction, snap1 +: tArgs), debugExp)
                   }
-                  Q(s3.copy(h = h3), v3)})
+                  val predData = s3.predicateData(predicate)
+                  (predData.upperBoundExp, predData.upperBoundTerm) match {
+                    case (Some(ub), None) => eval(s3.copy(h = h3), ub, pve, v3)((s4a, tUb, eUbNew, v4a) => {
+                      permissionSupporter.assertNotNegative(s4a, tUb, ub, eUbNew, pve, v4a)((s5, v5) => {
+                        val tmp = s5.predicateData(predicate)
+                        tmp.upperBoundTerm = Some(tUb)
+                        Q(s5.copy(predicateData = s5.predicateData + (predicate -> tmp)), v5)
+                      })
+                    })
+                    case (_, _) => Q(s3.copy(h = h3), v3)
+                  }
+                })
               }})))
 
       case wand: ast.MagicWand if s.qpMagicWands.contains(MagicWandIdentifier(wand, s.program)) =>
@@ -488,7 +511,19 @@ object producer extends ProductionRules {
               NegativePermission(acc.perm),
               QPAssertionNotInjective(acc.loc),
               v1
-            )(Q)
+            )((s2, v2) => {
+              val predData = s2.predicateData(predicate)
+              (predData.upperBoundExp, predData.upperBoundTerm) match {
+                case (Some(ub), None) => eval(s2, ub, pve, v2)((s4a, tUb, eUbNew, v4a) => {
+                  permissionSupporter.assertNotNegative(s4a, tUb, ub, eUbNew, pve, v4a)((s5, v5) => {
+                    val tmp = s5.predicateData(predicate)
+                    tmp.upperBoundTerm = Some(tUb)
+                    Q(s5.copy(predicateData = s5.predicateData + (predicate -> tmp)), v5)
+                  })
+                })
+                case (_, _) => Q(s2, v2)
+              }
+            })
           case (s1, _, _, _, _, None, v1) => Q(s1, v1)
         }
 

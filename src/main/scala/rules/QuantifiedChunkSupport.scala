@@ -1584,12 +1584,19 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       } else {
         Ite(condition, PermMin(permsProvided, permsNeeded), NoPerm)
       }
-      val permsTakenExp = conditionExp.map(c => ast.CondExp(c, buildMinExp(Seq(permsProvidedExp.get, permsNeededExp.get), ast.Perm), ast.NoPerm()())())
+      v.decider.prover.comment(s"Chunk used")
+      val usedCheck = Forall(codomainQVars, Implies(condition, IsPositive(permsTaken)), Nil)
+      val chunkUsed = v.decider.check(usedCheck, Verifier.config.checkTimeout())
+     if(chunkUsed) {
+        val permsTakenExp = conditionExp.map(c => ast.CondExp(c, buildMinExp(Seq(permsProvidedExp.get, permsNeededExp.get), ast.Perm), ast.NoPerm()())())
 
-      permsNeeded = PermMinus(permsNeeded, permsTaken)
-      permsNeededExp = permsNeededExp.map(pn => ast.PermSub(pn, permsTakenExp.get)())
-
-      (ch, permsTaken, permsNeeded, permsTakenExp, permsNeededExp)
+        permsNeeded = PermMinus(permsNeeded, permsTaken)
+        permsNeededExp = permsNeededExp.map(pn => ast.PermSub(pn, permsTakenExp.get)())
+       (ch, permsTaken, permsNeeded, permsTakenExp, permsNeededExp)
+      } else {
+       val permsTakenExp = conditionExp.map(c => ast.NoPerm()())
+       (ch, NoPerm, permsNeeded, permsTakenExp, permsNeededExp)
+     }
     }
 
     v.decider.prover.comment(s"Done precomputing, updating quantified chunks")

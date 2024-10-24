@@ -189,7 +189,17 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
     chunk match {
       case chunk: BasicChunk =>
         chunkSupporter.findChunk[BasicChunk](chunks, chunk.id, chunk.args, v)
-      case chunk: QuantifiedChunk => quantifiedChunkSupporter.findChunk(chunks, chunk, v)
+      case chunk: QuantifiedChunk => quantifiedChunkSupporter.findChunk(chunks, chunk, v) match {
+        case Some(res) => {
+          v.decider.prover.comment("Chunk found")
+          //Some(res)
+          None
+        }
+        case None => {
+          v.decider.prover.comment("Chunk not found")
+          None
+        }
+        }
       case _ => None
     }
   }

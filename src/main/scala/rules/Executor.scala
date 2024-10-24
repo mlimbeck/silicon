@@ -405,6 +405,7 @@ object executor extends ExecutionRules {
               field,
               FullPerm,
               Option.when(withExp)(ast.FullPerm()()),
+              Seq(),
               chunkOrderHeuristics,
               v2
             )

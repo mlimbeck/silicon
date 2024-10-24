@@ -1303,6 +1303,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                     resource,
                     rPerm,
                     rPermExp,
+                    effectiveTriggers,
                     chunkOrderHeuristics,
                     v2)
                 val optSmDomainDefinitionCondition2 =
@@ -1366,6 +1367,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                   resource,
                   lossOfInvOfLoc,
                   lossExp,
+                  effectiveTriggers,
                   chunkOrderHeuristics,
                   v
                 )
@@ -1440,6 +1442,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
           resource,
           rPerm,
           rPermExp,
+          Seq(),
           chunkOrderHeuristics,
           v
         )
@@ -1488,6 +1491,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         resource,
         permissions,
         permissionsExp,
+        Seq(),
         chunkOrderHeuristics,
         v
       )
@@ -1531,6 +1535,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                         resource: ast.Resource, // field f: e_1(rs).f; or predicate P: P(es); or magic wand
                         perms: Term, // p(rs)
                         permsExp: Option[ast.Exp], // p(rs)
+                        triggers: Seq[Trigger],
                         chunkOrderHeuristic: Seq[QuantifiedBasicChunk] => Seq[QuantifiedBasicChunk],
                         v: Verifier)
                        : (ConsumptionResult, State, Seq[QuantifiedBasicChunk]) = {
@@ -1559,7 +1564,9 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     val additionalArgs = s.relevantQuantifiedVariables.map(_._1)
     var currentFunctionRecorder = s.functionRecorder
 
-    val precomputedData = candidates map { ch =>
+    val sorted_candidates = candidates.sortBy(ch => ch.singletonArguments.isEmpty)
+
+    val precomputedData = sorted_candidates map { ch =>
       // ME: When using Z3 via API, it is beneficial to not use macros, since macro-terms will *always* be different
       // (leading to new terms that have to be translated), whereas without macros, we can usually use a term
       // that already exists.
@@ -1584,16 +1591,46 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       } else {
         Ite(condition, PermMin(permsProvided, permsNeeded), NoPerm)
       }
-      v.decider.prover.comment(s"Chunk used")
-      val usedCheck = Forall(codomainQVars, Implies(condition, IsPositive(permsTaken)), Nil)
-      val chunkUsed = v.decider.check(usedCheck, Verifier.config.checkTimeout())
-     if(chunkUsed) {
+      v.decider.prover.comment(s"Chunk check")
+      val chunkUnused = if (ch.singletonArguments.isDefined) {
+        val unusedCheck = Forall(codomainQVars, Implies(And(condition, IsPositive(permsNeeded)), permsTaken === NoPerm), Nil)
+        val tmp = v.decider.check(unusedCheck, Verifier.config.checkTimeout())
+        v.decider.prover.comment(s"Singular Chunk check: $tmp")
+        !tmp
+      } else {
+        false
+      }
+
+      // val unusedCheck = Forall(codomainQVars, Implies(And(condition, IsPositive(permsNeeded)), permsTaken === NoPerm), Nil)
+      // val chunkUnused = v.decider.check(unusedCheck, Verifier.config.checkTimeout())
+      // val trigger = Trigger(Seq(condition, IsPositive(permsProvided)))
+      // val usedCombined1 = Exists(codomainQVars, Implies(And(condition, IsPositive(permsNeeded)), IsPositive(permsProvided)), Seq(trigger))
+      // val usedCombined2 = Exists(codomainQVars, Implies(IsPositive(permsProvided), And(condition, IsPositive(permsNeeded))), Nil)
+      val usedCheck1 = Forall(codomainQVars, Implies(And(condition, IsPositive(permsNeeded)), IsPositive(permsProvided)), Nil)
+      val usedCheck2 = Forall(codomainQVars, Implies(IsPositive(permsProvided), And(condition, IsPositive(permsNeeded))), Nil)
+      val chunkUsed1 = v.decider.check(usedCheck1, Verifier.config.splitTimeout())
+      val chunkUsed2 = v.decider.check(usedCheck2, Verifier.config.splitTimeout())
+      // val chunkCombined1 = v.decider.check(usedCombined1, Verifier.config.splitTimeout())
+      //val chunkCombined2 = v.decider.check(usedCombined2, Verifier.config.checkTimeout())
+      // v.decider.prover.comment(s"Chunk combined check $chunkCombined1")
+      //v.decider.prover.comment(s"Chunk combined check $chunkCombined2")
+      //v.decider.prover.comment(s"Chunk unused check $chunkUnused")
+     if(chunkUsed1 || chunkUsed2 || chunkUnused) {
+       v.logger info s"Chunk used"
+       v.decider.prover.comment(s"Chunk used")
+       // v.decider.prover.comment(s"Chunk combined check $chunkCombined1")
+       // v.decider.prover.comment(s"Chunk unused check $chunkUnused")
         val permsTakenExp = conditionExp.map(c => ast.CondExp(c, buildMinExp(Seq(permsProvidedExp.get, permsNeededExp.get), ast.Perm), ast.NoPerm()())())
 
         permsNeeded = PermMinus(permsNeeded, permsTaken)
         permsNeededExp = permsNeededExp.map(pn => ast.PermSub(pn, permsTakenExp.get)())
        (ch, permsTaken, permsNeeded, permsTakenExp, permsNeededExp)
       } else {
+       v.logger info s"Chunk not used"
+       v.decider.prover.comment(s"Chunk not used")
+       // v.decider.prover.comment(s"Chunk combined check $chunkCombined1")
+       // v.decider.prover.comment(s"Chunk unused check $chunkUnused")
+       //v.decider.prover.comment(s"Chunk combined check $chunkCombined2")
        val permsTakenExp = conditionExp.map(c => ast.NoPerm()())
        (ch, NoPerm, permsNeeded, permsTakenExp, permsNeededExp)
      }

@@ -1007,9 +1007,9 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             val comment = "Definitional axioms for inverse functions"
             v.decider.prover.comment(comment)
             val definitionalAxiomMark = v.decider.setPathConditionMark()
-            v.decider.assume(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
-              Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
-            v.decider.assume(inv.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+//            v.decider.assume(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
+//              Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+//            v.decider.assume(inv.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
             val conservedPcs =
               if (s.recordPcs) (s.conservedPcs.head :+ v.decider.pcs.after(definitionalAxiomMark)) +: s.conservedPcs.tail
               else s.conservedPcs
@@ -1264,9 +1264,9 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
             v.decider.prover.comment("Definitional axioms for inverse functions")
 
-            v.decider.assume(inverseFunctions.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
-              Option.when(withExp)(DebugExp.createInstance("Inverse Function Axioms", isInternal_ = true)), enforceAssumption = false)
-            v.decider.assume(inverseFunctions.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance("Inverse function axiom", isInternal_ = true)), enforceAssumption = false)
+//             v.decider.assume(inverseFunctions.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
+//              Option.when(withExp)(DebugExp.createInstance("Inverse Function Axioms", isInternal_ = true)), enforceAssumption = false)
+//             v.decider.assume(inverseFunctions.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance("Inverse function axiom", isInternal_ = true)), enforceAssumption = false)
 
             if (s.heapDependentTriggers.contains(resourceIdentifier)){
               v.decider.assume(
@@ -1860,19 +1860,26 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     val inversesOfCodomains = Array.ofDim[Term](qvars.length)  /* inv_i(rs) */
 
     qvarsWithIndices foreach { case (qvar, idx) =>
-      val fun = v.decider.fresh("inv", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), qvar.sort)
+      //val fun = v.decider.fresh("inv", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), qvar.sort)
+      val fun = Fun(Identifier("second<Int>"), Seq(sorts.Ref), qvar.sort) // (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), qvar.sort)
       val inv = (ts: Seq[Term]) => App(fun, additionalInvArgs ++ ts)
+
+      //val surjective = Forall(codomainQVars, Exists(qvars, Implies(condition, invertibles.head === codomainQVars.head), Seq(Trigger(invertibles.head))), Nil)
+      //val surjective = Forall(codomainQVars, Implies(Forall(qvars, invertibles.head !== codomainQVars.head, Seq(Trigger(invertibles.head))), False), Nil)
+      //val surjectiveCheck = v.decider.check(surjective, Verifier.config.splitTimeout())
+      //v.decider.prover.comment(s"Surjective Check: $surjectiveCheck")
 
       inverseFunctions(idx) = fun
       inversesOfFcts(idx) = inv(invertibles)
       inversesOfCodomains(idx) = inv(codomainQVars)
 
-      val imgFun = v.decider.fresh("img", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), sorts.Bool)
+      // val imgFun = v.decider.fresh("img", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), sorts.Bool)
+      val imgFun = Fun(Identifier("img<Bool>"), Seq(sorts.Ref), sorts.Bool)
       val img = (ts: Seq[Term]) => App(imgFun, additionalInvArgs ++ ts)
 
       imageFunctions(idx) = imgFun
       imagesOfFcts(idx) = img(invertibles)
-      imagesOfCodomains(idx) = img(codomainQVars)
+      imagesOfCodomains(idx) =  img(codomainQVars)
     }
 
     /* f_1(inv_1(rs), ..., inv_n(rs)), ...,  f_m(inv_1(rs), ..., inv_n(rs)) */

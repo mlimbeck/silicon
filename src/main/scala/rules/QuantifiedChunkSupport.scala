@@ -524,7 +524,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         Forall(
           codomainQVar,
           Implies(effectiveCondition, BuiltinEquals(lookupSummary, lookupChunk)),
-          if (Verifier.config.disableISCTriggers()) Nil else Seq(Trigger(lookupSummary), Trigger(lookupChunk)),
+          if (Verifier.config.disableISCTriggers()) Nil else Seq(Trigger(lookupSummary)),
           s"qp.fvfValDef${v.counter(this).next()}",
           isGlobal = relevantQvars.isEmpty)
       })
@@ -752,41 +752,44 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       if (s.smDomainNeeded) {
         optQVarsInstantiations match {
           case None =>
-            val comment = "Definitional axioms for snapshot map domain"
-            v.decider.prover.comment(comment)
-            v.decider.assume(smDef.domainDefinitions, Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+            if(true) {
+              val comment = "Definitional axioms for snapshot map domain"
+              v.decider.prover.comment(comment)
+              v.decider.assume(smDef.domainDefinitions, Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+            }
           case Some(_instantiations) =>
             // TODO: Avoid pattern matching on resource
             val instantiations = resource match {
               case _: ast.Predicate | _: ast.MagicWand => Seq(toSnapTree(_instantiations))
               case _: ast.Field => _instantiations
             }
-
-            val comment = "Definitional axioms for snapshot map domain (instantiated)"
-            v.decider.prover.comment(comment)
-            // TODO: Avoid cast to Quantification
-            v.decider.assume(smDef.domainDefinitions.map(_.asInstanceOf[Quantification].instantiate(instantiations)),
-              Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+              val comment = "Definitional axioms for snapshot map domain (instantiated)"
+              v.decider.prover.comment(comment)
+              // TODO: Avoid cast to Quantification
+              v.decider.assume(smDef.domainDefinitions.map(_.asInstanceOf[Quantification].instantiate(instantiations)),
+                Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
         }
       }
 
       optQVarsInstantiations match {
         case None =>
-          val comment = "Definitional axioms for snapshot map values"
-          v.decider.prover.comment(comment)
-          v.decider.assume(smDef.valueDefinitions, Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+
+          if(true){
+            val comment = "Definitional axioms for snapshot map values"
+            v.decider.prover.comment(comment)
+            v.decider.assume(smDef.valueDefinitions, Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+          }
         case Some(_instantiations) =>
           // TODO: Avoid pattern matching on resource
           val instantiations = resource match {
             case _: ast.Predicate | _: ast.MagicWand => Seq(toSnapTree(_instantiations))
             case _: ast.Field => _instantiations
           }
-
           val comment = "Definitional axioms for snapshot map values (instantiated)"
-          v.decider.prover.comment(comment)
-          // TODO: Avoid cast to Quantification
-          v.decider.assume(smDef.valueDefinitions.map(_.asInstanceOf[Quantification].instantiate(instantiations)),
-            Option.when(withExp)(DebugExp.createInstance(comment, true)), enforceAssumption = false)
+            v.decider.prover.comment(comment)
+            // TODO: Avoid cast to Quantification
+            v.decider.assume(smDef.valueDefinitions.map(_.asInstanceOf[Quantification].instantiate(instantiations)),
+              Option.when(withExp)(DebugExp.createInstance(comment, true)), enforceAssumption = false)
       }
     }
 
@@ -810,7 +813,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             (smDef, s.smCache + (key, value))
           }
       }
-
+    v.decider.prover.comment("summarisingSnapshotMap")
     emitSnapshotMapDefinition(s, smDef, v, optQVarsInstantiations)
 
     (smDef, smCache)
@@ -1375,16 +1378,14 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                   val optSmDomainDefinitionCondition2 =
                     if (s2.smDomainNeeded) Some(And(condOfInvOfLoc, IsPositive(lossOfInvOfLoc), And(And(imagesOfFormalQVars))))
                     else None
-                  val (smDef2, smCache2) =
-                    quantifiedChunkSupporter.summarisingSnapshotMap(
-                      s2, resource, formalQVars, relevantChunks, v, optSmDomainDefinitionCondition2)
-                  val fr3 = s2.functionRecorder.recordFvfAndDomain(smDef2)
-                                               .recordFieldInv(inverseFunctions)
-                  val s3 = s2.copy(functionRecorder = fr3,
-                                   partiallyConsumedHeap = Some(h3),
-                                   constrainableARPs = s.constrainableARPs,
-                                   smCache = smCache2)
-                  Q(s3, h3, smDef2.sm.convert(sorts.Snap), v)
+//                  val (smDef2, smCache2) =
+//                    quantifiedChunkSupporter.summarisingSnapshotMap(
+//                      s2, resource, formalQVars, relevantChunks, v, optSmDomainDefinitionCondition2)
+                  // val fr3 = s2.functionRecorder.recordFvfAndDomain(smDef2)
+                                               //.recordFieldInv(inverseFunctions)
+                  val s3 = s2.copy(partiallyConsumedHeap = Some(h3),
+                                   constrainableARPs = s.constrainableARPs)
+                  Q(s3, h3, relevantChunks.head.snapshotMap, v)
                 case (Incomplete(_, _), s2, _) =>
                   createFailure(pve dueTo insufficientPermissionReason, v, s2, "QP consume")}
             }
@@ -1964,6 +1965,12 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     }
 
   override def findChunk(chunks: Iterable[Chunk], chunk: QuantifiedChunk, v: Verifier): Option[QuantifiedChunk] = {
+    val relevantChunks1: Iterable[QuantifiedBasicChunk] = chunks.flatMap {
+      case ch: QuantifiedBasicChunk if ch.id == chunk.id => Some(ch)
+      case _ => None
+    }
+
+    return None //relevantChunks1.headOption
     val lr = chunk match {
       case qfc: QuantifiedFieldChunk if qfc.invs.isDefined =>
         Left(qfc.invs.get.invertibles, qfc.quantifiedVars, qfc.condition)

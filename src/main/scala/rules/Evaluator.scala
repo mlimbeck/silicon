@@ -220,6 +220,7 @@ object evaluator extends EvaluationRules {
                * quantifier in whose body field 'fa.field' was accessed)
                * which is protected by a trigger term that we currently don't have.
                */
+              v1.decider.prover.comment("smCache found")
               v1.decider.assume(And(fvfDef.valueDefinitions), Option.when(withExp)(DebugExp.createInstance("Value definitions", isInternal_ = true)))
               if (s1.heapDependentTriggers.contains(fa.field)){
                 val trigger = FieldTrigger(fa.field.name, fvfDef.sm, tRcvr)
@@ -275,20 +276,19 @@ object evaluator extends EvaluationRules {
                     Q(s2, smLookup, newFa, v1)
                 }
               } else {
-                val (s2, smDef1, pmDef1) =
-                  quantifiedChunkSupporter.heapSummarisingMaps(
+                v1.decider.prover.comment("entered")
+                val (s2, pmDef1) =
+                  quantifiedChunkSupporter.permSummarisingMaps(
                     s = s1,
                     resource = fa.field,
                     codomainQVars = Seq(`?r`),
                     relevantChunks = relevantChunks,
-                    optSmDomainDefinitionCondition = None,
-                    optQVarsInstantiations = None,
                     v = v1)
-                if (s2.heapDependentTriggers.contains(fa.field)) {
-                  val trigger = FieldTrigger(fa.field.name, smDef1.sm, tRcvr)
-                  val triggerExp = Option.when(withExp)(DebugExp.createInstance(s"FieldTrigger(${eRcvr.toString()}.${fa.field.name})"))
-                  v1.decider.assume(trigger, triggerExp)
-                }
+//                if (s2.heapDependentTriggers.contains(fa.field)) {
+//                  val trigger = FieldTrigger(fa.field.name, smDef1.sm, tRcvr)
+//                  val triggerExp = Option.when(withExp)(DebugExp.createInstance(s"FieldTrigger(${eRcvr.toString()}.${fa.field.name})"))
+//                  v1.decider.assume(trigger, triggerExp)
+//                }
                 val (permCheck, permCheckExp) =
                   if (s2.triggerExp) {
                     (True, Option.when(withExp)(TrueLit()()))
@@ -300,10 +300,11 @@ object evaluator extends EvaluationRules {
                   case false =>
                     createFailure(pve dueTo InsufficientPermission(fa), v1, s2, permCheck, permCheckExp)
                   case true =>
-                    val smLookup = Lookup(fa.field.name, smDef1.sm, tRcvr)
+                    val smLookup = Lookup(fa.field.name, relevantChunks.head.fvf, tRcvr)
                     val fr2 =
                       s2.functionRecorder.recordSnapshot(fa, v1.decider.pcs.branchConditions, smLookup)
-                        .recordFvfAndDomain(smDef1)
+//                      s2.functionRecorder.recordSnapshot(fa, v1.decider.pcs.branchConditions, smLookup)
+//                        .recordFvfAndDomain(smDef1)
                     val s3 = s2.copy(functionRecorder = fr2)
                     Q(s3, smLookup, newFa, v1)
                 }

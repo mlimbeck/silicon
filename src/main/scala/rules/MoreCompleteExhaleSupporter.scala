@@ -320,11 +320,19 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
             pNeeded = PermMinus(pNeeded, pTaken)
             pNeededExp = permsExp.map(pe => ast.PermSub(pNeededExp.get, pTakenExp.get)(pe.pos, pe.info, pe.errT))
 
-            if (!v.decider.check(IsNonPositive(newChunk.perm), Verifier.config.splitTimeout())) {
+            if (!v.decider.check(IsNonPositive(newChunk.perm), Verifier.config.checkTimeout())) {
               newChunks.append(newChunk)
+              v.decider.prover.comment("check1 failed")
+            } else {
+              v.decider.prover.comment("check1 succeeded")
             }
 
             moreNeeded = !v.decider.check(pNeeded === NoPerm, Verifier.config.splitTimeout())
+            if(moreNeeded){
+              v.decider.prover.comment("check2 failed")
+            } else {
+              v.decider.prover.comment("check2 succeeded")
+            }
           } else {
             newChunks.append(ch)
           }

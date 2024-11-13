@@ -504,7 +504,8 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                               v: Verifier)
                              : (Term, Seq[Quantification], Option[Quantification]) = {
     val relevantQvars = s.quantifiedVariables.map(_._1).filter(qvar => relevantChunks.map(_.snapshotMap).exists(sm => sm.contains(qvar)))
-
+    v.decider.prover.comment("relevantQvars fields")
+    v.decider.prover.comment(relevantQvars.toString())
     val additionalFvfArgs = s.functionRecorderQuantifiedVariables().map(_._1)
     val sm = freshSnapshotMap(s, field, additionalFvfArgs, v)
 
@@ -572,7 +573,8 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
 
     val relevantQvars = s.quantifiedVariables.map(_._1).filter(qvar => relevantChunks.map(_.snapshotMap).exists(sm => sm.contains(qvar)))
-
+    v.decider.prover.comment("relevantQvars Pred")
+    v.decider.prover.comment(relevantQvars.toString())
     val additionalFvfArgs = s.functionRecorderQuantifiedVariables().map(_._1)
     val sm = freshSnapshotMap(s, resource, additionalFvfArgs, v)
 
@@ -807,7 +809,9 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             /* TODO: smCache records total permissions, pmCache seems to do the same - why? */
             val key = (resource, relevantChunks)
             val value = (smDef, totalPermissions, optSmDomainDefinitionCondition)
+            v.decider.prover.comment((s.smCache + (key, value)).toString)
             (smDef, s.smCache + (key, value))
+
           }
       }
 

@@ -43,6 +43,7 @@ abstract class ProverStdIO(uniqueId: String,
   var proverPath: Path = _
   var lastReasonUnknown : String = _
   var lastModel : String = _
+  var checkTimes: Seq[Long] = Seq()
 
   def exeEnvironmentalVariable: String
   def dependencies: Seq[SilDefaultDependency]
@@ -279,7 +280,7 @@ abstract class ProverStdIO(uniqueId: String,
     }
 
     pop()
-
+    checkTimes = checkTimes :+ (endTime-startTime)
     (result, endTime - startTime)
   }
 
@@ -293,8 +294,11 @@ abstract class ProverStdIO(uniqueId: String,
   def saturate(timeout: Int, comment: String): Unit = {
     this.comment(s"State saturation: $comment")
     setTimeout(Some(timeout))
+    val startTime = System.currentTimeMillis()
     writeLine("(check-sat)")
     readLine()
+    val endTime = System.currentTimeMillis()
+    checkTimes = checkTimes :+ (endTime-startTime)
   }
 
   protected def retrieveAndSaveModel(): Unit = {
@@ -351,13 +355,18 @@ abstract class ProverStdIO(uniqueId: String,
   def check(timeout: Option[Int] = None): Result = {
     setTimeout(timeout)
 
+    val startTime = System.currentTimeMillis()
     writeLine("(check-sat)")
 
-    readLine() match {
+
+    val res = readLine() match {
       case "sat" => Sat
       case "unsat" => Unsat
       case "unknown" => Unknown
     }
+    val endTime = System.currentTimeMillis()
+    checkTimes = checkTimes :+ (endTime-startTime)
+    res
   }
 
   def statistics(): Map[String, String] = {

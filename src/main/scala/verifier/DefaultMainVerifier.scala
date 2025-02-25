@@ -18,7 +18,7 @@ import viper.silver.ast
 import viper.silver.components.StatefulComponent
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
-import viper.silicon.decider.SMTLib2PreambleReader
+import viper.silicon.decider.{ProverStdIO, SMTLib2PreambleReader}
 import viper.silicon.extensions.ConditionalPermissionRewriter
 import viper.silicon.interfaces._
 import viper.silicon.interfaces.decider.ProverLike
@@ -240,9 +240,7 @@ class DefaultMainVerifier(config: Config,
       logger debug s"Silicon finished verification of predicate `${predicate.name}` in ${viper.silver.reporter.format.formatMillisReadably(elapsed)} seconds with the following result: ${condenseToViperResult(results).toString}"
       setErrorScope(results, predicate)
     })
-
     decider.prover.stop()
-
     _verificationPoolManager.pooledVerifiers.comment("-" * 60)
     _verificationPoolManager.pooledVerifiers.comment("Begin function- and predicate-related preamble")
     predicateSupporter.declareSortsAfterVerification(_verificationPoolManager.pooledVerifiers)
@@ -254,6 +252,7 @@ class DefaultMainVerifier(config: Config,
     _verificationPoolManager.pooledVerifiers.comment("End function- and predicate-related preamble")
     _verificationPoolManager.pooledVerifiers.comment("-" * 60)
     var stats: Map[String, String] = Map()
+    var checks: Seq[Long] = Seq()
     val verificationTaskFutures: Seq[Future[Seq[VerificationResult]]] =
       program.methods.filterNot(excludeMethod).map(method => {
 
@@ -269,6 +268,7 @@ class DefaultMainVerifier(config: Config,
           reporter report VerificationResultMessage(s"silicon", method, elapsed, condenseToViperResult(results))
           logger debug s"Silicon finished verification of method `${method.name}` in ${viper.silver.reporter.format.formatMillisReadably(elapsed)} seconds with the following result: ${condenseToViperResult(results).toString}"
           stats = v.decider.statistics()
+          checks = v.decider.prover.asInstanceOf[ProverStdIO].checkTimes
           setErrorScope(results, method)
         })
       }) ++ cfgs.map(cfg => {
@@ -297,6 +297,7 @@ class DefaultMainVerifier(config: Config,
     }
     reporter report VerificationTerminationMessage()
     reporter report(AnnotationWarning(s"statistics: \n ${stats.toString()}"))
+    reporter report(AnnotationWarning(s"checks: \n ${checks.toString()}"))
     val verificationResults = (   functionVerificationResults
      ++ predicateVerificationResults
      ++ methodVerificationResults)

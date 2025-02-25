@@ -23,10 +23,11 @@ import viper.silicon.utils.ast.{BigAnd, buildMinExp}
 import viper.silicon.utils.notNothing.NotNothing
 import viper.silicon.verifier.Verifier
 import viper.silver.ast
+import viper.silver.ast.TrueLit
 import viper.silver.parser.PUnknown
 import viper.silver.reporter.InternalWarningMessage
 import viper.silver.verifier.reasons.{InsufficientPermission, MagicWandChunkNotFound}
-import viper.silver.verifier.{ErrorReason, PartialVerificationError}
+import viper.silver.verifier.{ErrorReason, PartialVerificationError, VerificationError}
 
 import scala.collection.immutable.ArraySeq
 import scala.reflect.ClassTag
@@ -2185,4 +2186,108 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
     hints
   }
+  def lookup(s: State,
+             resourceAcc: ast.ResourceAccess,
+             tArgs: Seq[Term],
+             argsExp: Option[Seq[ast.Exp]],
+             ve: VerificationError,
+             v: Verifier)
+            (Q: (State, Term, Verifier) => VerificationResult)
+  : VerificationResult = {
+    val lookupFunction =
+      if (s.moreCompleteExhale || s.triggerExp) lookupComplete _
+      else lookupGreedy _
+    lookupFunction(s, resourceAcc, tArgs, argsExp, ve, v)((s2, tSnap, v2) =>
+      Q(s2, tSnap, v2))
+  }
+
+  private def lookupComplete(s: State,
+                             resourceAcc: ast.ResourceAccess,
+                             args: Seq[Term],
+                             argsExp: Option[Seq[ast.Exp]],
+                             ve: VerificationError,
+                             v: Verifier)
+                            (Q: (State, Term, Verifier) => VerificationResult)
+  : VerificationResult = {
+    val resource = resourceAcc.res(s.program)
+    val id = ChunkIdentifier(resource, s.program)
+    val (relevantChunks, _) = quantifiedChunkSupporter.splitHeap[QuantifiedFieldChunk](s.h, id)
+    val codomainVars =
+      resource match {
+        case _: ast.Field => Seq(`?r`)
+        case p: ast.Predicate => s.predicateFormalVarMap(p)
+        case w: ast.MagicWand =>
+          val bodyVars = w.subexpressionsToEvaluate(s.program)
+          bodyVars.indices.toList.map(i => Var(Identifier(s"x$i"), v.symbolConverter.toSort(bodyVars(i).typ), false))
+      }
+
+    val (s1, smDef1, pmDef1) =
+      quantifiedChunkSupporter.heapSummarisingMaps(
+        s = s,
+        resource = resource,
+        codomainQVars = codomainVars,
+        relevantChunks = relevantChunks,
+        optSmDomainDefinitionCondition = None,
+        optQVarsInstantiations = None,
+        v = v)
+    val fr = s1.functionRecorder.recordFvfAndDomain(smDef1)
+    val s2 = s1.copy(functionRecorder = fr)
+    if (s2.heapDependentTriggers.contains(resource)) {
+      val trigger = ResourceTriggerFunction(resource, smDef1.sm, args, s2.program)
+      val triggerExp = Option.when(withExp)(DebugExp.createInstance(s"qp.evalResTrgDef${v.counter(this).next()}"))
+      v.decider.assume(trigger, triggerExp)
+    }
+    if (!s2.triggerExp) {
+      val (permCheck, permCheckExp) = if (s2.triggerExp) {
+        (True, Option.when(withExp)(TrueLit()()))
+      } else {
+        val totalPermissions = ResourcePermissionLookup(resource, pmDef1.pm, args, s1.program)
+        (IsPositive(totalPermissions),
+          Option.when(withExp)(ast.PermGtCmp(ast.CurrentPerm(resourceAcc)(resourceAcc.pos, resourceAcc.info, resourceAcc.errT),
+            ast.NoPerm()())(resourceAcc.pos, resourceAcc.info, resourceAcc.errT)))
+      }
+      v.decider.assert(permCheck) {
+        case false =>
+          return createFailure(ve, v, s2, permCheck, permCheckExp)
+        case _ => Q(s2, ResourceLookup(resource, smDef1.sm, args, s2.program), v)
+      }
+    } else {
+      Q(s2, ResourceLookup(resource, smDef1.sm, args, s2.program), v)
+    }
+  }
+
+  private def lookupGreedy(s: State,
+                           resourceAcc: ast.ResourceAccess,
+                           args: Seq[Term],
+                           argsExp: Option[Seq[ast.Exp]],
+                           ve: VerificationError,
+                           v: Verifier)
+                          (Q: (State, Term, Verifier) => VerificationResult)
+  : VerificationResult = {
+    val resource = resourceAcc.res(s.program)
+    val id = ChunkIdentifier(resource, s.program)
+    val (relevantChunks, _) = quantifiedChunkSupporter.splitHeap[QuantifiedBasicChunk](s.h, id)
+
+    val candidates =
+      if (Verifier.config.disableChunkOrderHeuristics()) relevantChunks
+      else quantifiedChunkSupporter.singleReceiverChunkOrderHeuristic(args,
+        quantifiedChunkSupporter.extractHints(None, args), v)(relevantChunks)
+    candidates foreach { ch =>
+      val chunkPerm = ch.perm.replace(ch.quantifiedVars, args)
+      if (s.heapDependentTriggers.contains(resource)) {
+        val trigger = ResourceTriggerFunction(resource, ch.snapshotMap, args, s.program)
+        val triggerExp = Option.when(withExp)(DebugExp.createInstance(s"qp.evalResTrgDef${v.counter(this).next()}"))
+        v.decider.assume(trigger, triggerExp)
+      }
+      v.decider.prover.comment("Check for single chunk with enough permissions")
+      val permCheck = v.decider.check(IsPositive(chunkPerm), 10 * Verifier.config.checkTimeout())
+      if (permCheck)
+        return Q(s, ch.valueAt(args), v)
+    }
+    // cannot find single chunk with enough permissions
+    lookupComplete(s, resourceAcc, args, argsExp, ve, v)((s2, tSnap, v2) =>
+      Q(s2, tSnap, v2))
+  }
 }
+
+

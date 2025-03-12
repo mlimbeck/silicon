@@ -11,6 +11,7 @@ import viper.silver.ast
 import viper.silicon.rules.PermMapDefinition
 import viper.silicon.rules.moreCompleteExhaleSupporter.TaggedSummarisingSnapshot
 import viper.silicon.state.terms.Term
+import viper.silicon.rules.InverseFunctions
 
 package object state {
   type PmCache =
@@ -22,4 +23,9 @@ package object state {
     Map[
       (ast.Resource, Seq[NonQuantifiedChunk], Seq[Term]),
       (TaggedSummarisingSnapshot, Seq[Term], Term, Option[ast.Exp])]
+
+  type InvCache =
+    Map[
+      (Term, Seq[Term]),
+      (InverseFunctions, Seq[Term])]
 }

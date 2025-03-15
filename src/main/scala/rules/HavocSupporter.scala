@@ -133,7 +133,7 @@ object havocSupporter extends SymbolicExecutionRules {
           case false => createFailure(pve dueTo notInjectiveReason, v, s1, receiverInjectivityCheck, "QP receiver injective")
           case true =>
             // Generate the inverse axioms
-            val (inverseFunctions, imagesOfCodomain) = quantifiedChunkSupporter.getFreshInverseFunctions(
+            val (inverseFunctions, imagesOfCodomain,invCache) = quantifiedChunkSupporter.getFreshInverseFunctions(
               qvars = tVars,
               qvarExps = eVars,
               condition = tCond,
@@ -145,6 +145,7 @@ object havocSupporter extends SymbolicExecutionRules {
               additionalInvArgExps = Option.when(withExp)(Seq()),
               userProvidedTriggers = None,
               qidPrefix = qid,
+              s,
               v = v1
             )
             val comment = "Definitional axioms for havocall inverse functions"
@@ -160,7 +161,7 @@ object havocSupporter extends SymbolicExecutionRules {
               else
                 havocNonQuantifiedResource(s1, tCond, resource, HavocallData(inverseFunctions, codomainQVars, imagesOfCodomain), v1)
 
-            Q(s1.copy(h = Heap(newChunks)), v1)
+            Q(s1.copy(h = Heap(newChunks), invCache = invCache), v1)
         }
       case (s1, _, _, _, _, None, v1) => Q(s1, v1)
     }

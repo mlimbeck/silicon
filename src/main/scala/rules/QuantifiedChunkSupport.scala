@@ -528,7 +528,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         Forall(
           codomainQVar,
           Implies(effectiveCondition, BuiltinEquals(lookupSummary, lookupChunk)),
-          if (Verifier.config.disableISCTriggers()) Nil else Seq(Trigger(lookupSummary), Trigger(lookupChunk)),
+          if (Verifier.config.disableISCTriggers()) Nil else Seq(Trigger(lookupSummary)),
           s"qp.fvfValDef${v.counter(this).next()}",
           isGlobal = relevantQvars.isEmpty)
       })
@@ -617,7 +617,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         Forall(
           qvar,
           Implies(effectiveCondition, And(snapshotNotUnit, BuiltinEquals(lookupSummary, lookupChunk))),
-          if (Verifier.config.disableISCTriggers()) Nil else Seq(Trigger(lookupSummary), Trigger(lookupChunk)),
+          if (Verifier.config.disableISCTriggers()) Nil else Seq(Trigger(lookupSummary)),
           s"qp.psmValDef${v.counter(this).next()}",
           isGlobal = relevantQvars.isEmpty)
       })

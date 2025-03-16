@@ -21,7 +21,7 @@ package object state {
   type SsCache =
     Map[
       (ast.Resource, Seq[NonQuantifiedChunk], Seq[Term]),
-      (TaggedSummarisingSnapshot, Seq[Term], Term, Option[ast.Exp])]
+      (Option[TaggedSummarisingSnapshot], Option[Seq[Term]], Term, Option[ast.Exp])]
 
   type InvCache =
     Map[

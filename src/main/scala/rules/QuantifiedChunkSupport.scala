@@ -155,8 +155,9 @@ trait QuantifiedChunkSupport extends SymbolicExecutionRules {
                                additionalInvArgExps: Option[Seq[ast.AbstractLocalVar]],
                                userProvidedTriggers: Option[Seq[Trigger]],
                                qidPrefix: String,
+                               s: State,
                                v: Verifier)
-                              : (InverseFunctions, Seq[Term])
+                              : (InverseFunctions, Seq[Term], InvCache)
 
   def injectivityAxiom(qvars: Seq[Var],
                        condition: Term,
@@ -213,8 +214,9 @@ trait QuantifiedChunkSupport extends SymbolicExecutionRules {
                             userProvidedTriggers: Option[Seq[Trigger]],
                             qidPrefix: String,
                             v: Verifier,
+                            s: State,
                             program: ast.Program)
-                           : (QuantifiedBasicChunk, InverseFunctions)
+                           : (QuantifiedBasicChunk, InverseFunctions, InvCache)
 
   def splitHeap[CH <: QuantifiedBasicChunk : NotNothing : ClassTag]
                (h: Heap, id: ChunkIdentifer)
@@ -316,10 +318,11 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                             userProvidedTriggers: Option[Seq[Trigger]],
                             qidPrefix: String,
                             v: Verifier,
+                            s: State,
                             program: ast.Program)
-                           : (QuantifiedBasicChunk, InverseFunctions) = {
+                           : (QuantifiedBasicChunk, InverseFunctions, InvCache) = {
 
-    val (inverseFunctions, imagesOfCodomain) =
+    val (inverseFunctions, imagesOfCodomain, invCache) =
       getFreshInverseFunctions(
         qvars,
         qvarExps,
@@ -332,6 +335,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         additionalInvArgExps,
         userProvidedTriggers,
         qidPrefix,
+        s,
         v)
 
     val qvarsToInversesOfCodomain = inverseFunctions.qvarsToInversesOf(codomainQVars)
@@ -357,8 +361,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         None,
         hints,
         program)
-
-    (ch, inverseFunctions)
+    (ch, inverseFunctions, invCache)
   }
 
   /* State queries */
@@ -898,7 +901,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     else
       WildcardSimplifyingPermTimes(tPerm, s.permissionScalingFactor)
     val gainExp = ePerm.map(p => ast.PermMul(p, s.permissionScalingFactorExp.get)(p.pos, p.info, p.errT))
-    val (ch: QuantifiedBasicChunk, inverseFunctions) =
+    val (ch: QuantifiedBasicChunk, inverseFunctions, invCache) =
       quantifiedChunkSupporter.createQuantifiedChunk(
         qvars                = qvars,
         qvarExps             = qvarExps,
@@ -917,6 +920,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         userProvidedTriggers = optTrigger.map(_ => tTriggers),
         qidPrefix            = qid,
         v                    = v,
+        s                    = s,
         program              = s.program)
     val (effectiveTriggers, effectiveTriggersQVars, effectiveTriggersQVarExps) =
       optTrigger match {
@@ -1004,12 +1008,21 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             val ax = inverseFunctions.axiomInversesOfInvertibles
             val inv = inverseFunctions.copy(axiomInversesOfInvertibles = Forall(ax.vars, ax.body, effectiveTriggers))
 
+            val internalQvars = qvars.zipWithIndex.map(v => Var(Identifier(s"i@${v._2}"), v._1.sort, false))
+            val internalCond = tCond.replace(qvars, internalQvars)
+            val internalArgs = tArgs.map(arg => arg.replace(qvars, internalQvars))
+
             val comment = "Definitional axioms for inverse functions"
             v.decider.prover.comment(comment)
             val definitionalAxiomMark = v.decider.setPathConditionMark()
-            v.decider.assume(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
-              Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
-            v.decider.assume(inv.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+            if (!s.invCache.contains((internalCond, internalArgs)) && !s.exhaleExt) {
+                v.decider.assume(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
+                Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+              v.decider.assume(inv.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
+            } else {
+              v.decider.prover.comment("cached inv functions")
+              v.decider.prover.comment(s"inverse function: ${inv}")
+            }
             val conservedPcs =
               if (s.recordPcs) (s.conservedPcs.head :+ v.decider.pcs.after(definitionalAxiomMark)) +: s.conservedPcs.tail
               else s.conservedPcs
@@ -1069,7 +1082,8 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
               s.copy(h = h1,
                      functionRecorder = fr1.recordFieldInv(inv),
                      conservedPcs = conservedPcs,
-                     smCache = smCache1)
+                     smCache = smCache1,
+                     invCache = invCache)
             Q(s1, v)
           case false =>
             createFailure(pve dueTo notInjectiveReason, v, s, receiverInjectivityCheck, "QP receiver is injective")}
@@ -1160,7 +1174,11 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
              (Q: (State, Heap, Term, Verifier) => VerificationResult)
              : VerificationResult = {
 
-    val (inverseFunctions, imagesOfFormalQVars) =
+    val internalQvars = qvars.zipWithIndex.map(v => Var(Identifier(s"i@${v._2}"), v._1.sort, false))
+    val internalCond = tCond.replace(qvars, internalQvars)
+    val internalArgs = tArgs.map(arg => arg.replace(qvars, internalQvars))
+
+    val (inverseFunctions, imagesOfFormalQVars, invCache) =
       quantifiedChunkSupporter.getFreshInverseFunctions(
         qvars,
         qvarExps,
@@ -1173,7 +1191,9 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         Option.when(withExp)(s.relevantQuantifiedVariables(tArgs).map(_._2.get)),
         optTrigger.map(_ => tTriggers),
         qid,
+        s,
         v)
+
     val (effectiveTriggers, effectiveTriggersQVars) =
     optTrigger match {
       case Some(_) =>
@@ -1263,11 +1283,14 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             val argumentsMatchExp = formalQVarsExp.map(qv => BigAnd(qv.zip(eArgs.get).map(va => ast.EqCmp(va._1.localVar, va._2)(va._1.pos, va._1.info, va._1.errT))))
 
             v.decider.prover.comment("Definitional axioms for inverse functions")
-
-            v.decider.assume(inverseFunctions.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
-              Option.when(withExp)(DebugExp.createInstance("Inverse Function Axioms", isInternal_ = true)), enforceAssumption = false)
-            v.decider.assume(inverseFunctions.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance("Inverse function axiom", isInternal_ = true)), enforceAssumption = false)
-
+            if (!s.invCache.contains((internalCond, internalArgs)) && !s.exhaleExt) {
+              v.decider.assume(inverseFunctions.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
+                Option.when(withExp)(DebugExp.createInstance("Inverse Function Axioms", isInternal_ = true)), enforceAssumption = false)
+              v.decider.assume(inverseFunctions.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance("Inverse function axiom", isInternal_ = true)), enforceAssumption = false)
+            } else {
+              v.decider.prover.comment("cached inv functions")
+              v.decider.prover.comment(s"inverse function: ${inverseFunctions}")
+            }
             if (s.heapDependentTriggers.contains(resourceIdentifier)){
               v.decider.assume(
                 Seq(Forall(
@@ -1282,7 +1305,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             /* TODO: Try to unify the upcoming if/else-block, their code is rather similar */
             if (s.exhaleExt) {
               magicWandSupporter.transfer[QuantifiedBasicChunk](
-                                          s.copy(smCache = smCache1),
+                                          s.copy(smCache = smCache1, invCache = invCache),
                                           lossOfInvOfLoc,
                                           lossExp,
                                           createFailure(pve dueTo insufficientPermissionReason/*InsufficientPermission(acc.loc)*/, v, s, "consuming QP"),
@@ -1316,7 +1339,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                   case Incomplete(remaining, remainingExp) =>
                     (PermMinus(rPerm, remaining), rPermExp.map(rp => ast.PermSub(rp, remainingExp.get)(rp.pos, rp.info, rp.errT)))
                 }
-                val (consumedChunk, inverseFunctions) = quantifiedChunkSupporter.createQuantifiedChunk(
+                val (consumedChunk, inverseFunctions, invCache) = quantifiedChunkSupporter.createQuantifiedChunk(
                   qvars,
                   qvarExps,
                   condOfInvOfLoc,
@@ -1334,6 +1357,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                   optTrigger.map(_ => tTriggers),
                   qid,
                   v2,
+                  s3,
                   s.program
                 )
                 val debugExp = Option.when(withExp)(DebugExp.createInstance("Inverse functions for quantified permission", true))
@@ -1356,7 +1380,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
               v.decider.clearModel()
               val permissionRemovalResult =
                 quantifiedChunkSupporter.removePermissions(
-                  s.copy(smCache = smCache1),
+                  s.copy(smCache = smCache1, invCache = invCache),
                   relevantChunks,
                   formalQVars,
                   formalQVarsExp,
@@ -1411,7 +1435,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
     val resource = resourceAccess.res(s.program)
     val chunkIdentifier = ChunkIdentifier(resource, s.program)
-
+    v.decider.prover.comment(s"arguments: ${arguments}")
     val chunkOrderHeuristics = optChunkOrderHeuristic match {
       case Some(heuristics) =>
         heuristics
@@ -1836,8 +1860,9 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                                additionalInvArgExps: Option[Seq[ast.AbstractLocalVar]],
                                userProvidedTriggers: Option[Seq[Trigger]],
                                qidPrefix: String,
+                               s: State,
                                v: Verifier)
-                              : (InverseFunctions, Seq[Term]) = {
+                              : (InverseFunctions, Seq[Term], InvCache) = {
 
     assert(
       invertibles.length == codomainQVars.length,
@@ -1850,6 +1875,12 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         s"Sorts of the invertibles ${invertibles.mkString(", ")} doesn't match the sorts of the "
       + s"codomain quantification variables ${codomainQVars.mkString(", ")}")
 
+    val internalQvars = qvars.zipWithIndex.map(v => Var(Identifier(s"i@${v._2}"), v._1.sort, false))
+    val internalCond = condition.replace(qvars, internalQvars)
+    val internalArgs = invertibles.map(arg => arg.replace(qvars, internalQvars))
+    val cached = s.invCache.get((internalCond, internalArgs))
+
+
     val qvarsWithIndices = qvars.zipWithIndex
 
     val inverseFunctions = Array.ofDim[Function](qvars.length) /* inv_i */
@@ -1860,20 +1891,30 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     val inversesOfCodomains = Array.ofDim[Term](qvars.length)  /* inv_i(rs) */
 
     qvarsWithIndices foreach { case (qvar, idx) =>
-      val fun = v.decider.fresh("inv", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), qvar.sort)
+      val (fun, imgFun) = if(cached.isDefined){
+        (cached.get._1(idx),
+          cached.get._2(idx))
+      } else {
+        (v.decider.fresh("inv", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), qvar.sort),
+          v.decider.fresh("img", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), sorts.Bool))
+      }
       val inv = (ts: Seq[Term]) => App(fun, additionalInvArgs ++ ts)
+      val img = (ts: Seq[Term]) => App(imgFun, additionalInvArgs ++ ts)
+
 
       inverseFunctions(idx) = fun
       inversesOfFcts(idx) = inv(invertibles)
       inversesOfCodomains(idx) = inv(codomainQVars)
 
-      val imgFun = v.decider.fresh("img", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), sorts.Bool)
-      val img = (ts: Seq[Term]) => App(imgFun, additionalInvArgs ++ ts)
+
 
       imageFunctions(idx) = imgFun
       imagesOfFcts(idx) = img(invertibles)
       imagesOfCodomains(idx) = img(codomainQVars)
     }
+
+    val invCache =  if (!s.invCache.contains((internalCond, internalArgs)))
+      s.invCache + ((internalCond, internalArgs) -> (inverseFunctions, imageFunctions)) else s.invCache
 
     /* f_1(inv_1(rs), ..., inv_n(rs)), ...,  f_m(inv_1(rs), ..., inv_n(rs)) */
     val fctsOfInversesOfCodomain =
@@ -1951,7 +1992,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       qvars.zip(inverseFunctions).to(Map),
       qvars.zip(imageFunctions).filter(_._2 != null).to(Map)
     )
-    (res, imagesOfCodomains)
+    (res, imagesOfCodomains, invCache)
   }
 
   def hintBasedChunkOrderHeuristic(hints: Seq[Term])

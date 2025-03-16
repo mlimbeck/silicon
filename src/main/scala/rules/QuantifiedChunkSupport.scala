@@ -1015,12 +1015,13 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             val comment = "Definitional axioms for inverse functions"
             v.decider.prover.comment(comment)
             val definitionalAxiomMark = v.decider.setPathConditionMark()
-            if (!s.invCache.contains((internalCond, internalArgs))) {
+            if (!s.invCache.contains((internalCond, internalArgs)) && !s.exhaleExt) {
                 v.decider.assume(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
                 Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
               v.decider.assume(inv.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance(comment, isInternal_ = true)), enforceAssumption = false)
             } else {
               v.decider.prover.comment("cached inv functions")
+              v.decider.prover.comment(s"inverse function: ${inv}")
             }
             val conservedPcs =
               if (s.recordPcs) (s.conservedPcs.head :+ v.decider.pcs.after(definitionalAxiomMark)) +: s.conservedPcs.tail
@@ -1282,12 +1283,13 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             val argumentsMatchExp = formalQVarsExp.map(qv => BigAnd(qv.zip(eArgs.get).map(va => ast.EqCmp(va._1.localVar, va._2)(va._1.pos, va._1.info, va._1.errT))))
 
             v.decider.prover.comment("Definitional axioms for inverse functions")
-            if (!s.invCache.contains((internalCond, internalArgs))) {
+            if (!s.invCache.contains((internalCond, internalArgs)) && !s.exhaleExt) {
               v.decider.assume(inverseFunctions.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
                 Option.when(withExp)(DebugExp.createInstance("Inverse Function Axioms", isInternal_ = true)), enforceAssumption = false)
               v.decider.assume(inverseFunctions.definitionalAxioms, Option.when(withExp)(DebugExp.createInstance("Inverse function axiom", isInternal_ = true)), enforceAssumption = false)
             } else {
               v.decider.prover.comment("cached inv functions")
+              v.decider.prover.comment(s"inverse function: ${inverseFunctions}")
             }
             if (s.heapDependentTriggers.contains(resourceIdentifier)){
               v.decider.assume(

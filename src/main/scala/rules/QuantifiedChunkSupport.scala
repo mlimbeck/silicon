@@ -340,7 +340,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
     val qvarsToInversesOfCodomain = inverseFunctions.qvarsToInversesOf(codomainQVars)
 
-    val cond = And(And(imagesOfCodomain), condition.replace(qvarsToInversesOfCodomain))
+    val cond = And(imagesOfCodomain)
     val perms = permissions.replace(qvarsToInversesOfCodomain)
 
     val hints = extractHints(Some(condition), arguments)
@@ -1320,7 +1320,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                     relevantChunks,
                     formalQVars,
                     formalQVarsExp,
-                    And(condOfInvOfLoc, And(imagesOfFormalQVars), argumentsMatch),
+                    And(And(imagesOfFormalQVars), argumentsMatch),
                     eCond.map(c => ast.And(c, argumentsMatchExp.get)()),
                     None,
                     resource,
@@ -1384,7 +1384,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
                   relevantChunks,
                   formalQVars,
                   formalQVarsExp,
-                  And(condOfInvOfLoc, And(imagesOfFormalQVars), argumentsMatch),
+                  And(And(imagesOfFormalQVars), argumentsMatch),
                   eCond.map(c => ast.And(c, argumentsMatchExp.get)()),
                   None,
                   resource,
@@ -1930,10 +1930,13 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
      *   &&  inv_n(f_1(xs), ..., f_m(xs)) == x_n && img_n(f_1(xs), ..., f_m(xs))
      */
     val axInvsOfFctsBody =
-      Implies(
+      And(Implies(
         condition,
         And(And(qvarsWithIndices map { case (qvar, idx) => inversesOfFcts(idx) === qvar }),
-            And(qvarsWithIndices map { case (_, idx) => imagesOfFcts(idx) })))
+            And(qvarsWithIndices map { case (_, idx) => imagesOfFcts(idx) }))),
+        Implies(
+        Not(condition),
+          And(qvarsWithIndices map { case (_, idx) => Not(imagesOfFcts(idx)) })))
 
     val axInvsOfFct =
       userProvidedTriggers match {
@@ -1961,7 +1964,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
      */
     val axFctsOfInvsBody =
       Implies(
-        And(And(imagesOfCodomains), conditionOfInverses),
+        And(imagesOfCodomains),
         And(
           fctsOfInversesOfCodomain
             .zip(codomainQVars)
@@ -1969,7 +1972,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
     val axFctsOfInvsTriggers: Seq[Trigger] =
       if (Verifier.config.disableISCTriggers()) Nil
-      else ArraySeq.unsafeWrapArray(inversesOfCodomains.map(Trigger.apply))
+      else ArraySeq.unsafeWrapArray(imagesOfCodomains.map(Trigger.apply))
 
     val axFctsOfInvs =
       v.triggerGenerator.assembleQuantification(

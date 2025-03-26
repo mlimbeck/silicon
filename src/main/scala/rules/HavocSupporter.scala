@@ -117,6 +117,7 @@ object havocSupporter extends SymbolicExecutionRules {
         val receiverInjectivityCheck =
           quantifiedChunkSupporter.injectivityAxiom(
             qvars     = tVars,
+            qvarsTypes = tVars.map(x => x.sort),
             condition = tCond,
             perms     = FullPerm,
             arguments = tArgs,

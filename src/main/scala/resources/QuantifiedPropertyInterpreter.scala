@@ -7,8 +7,8 @@
 package viper.silicon.resources
 
 import viper.silicon.interfaces.state.QuantifiedChunk
-import viper.silicon.state.terms
-import viper.silicon.state.terms.{Term, Trigger, Var}
+import viper.silicon.state.{Identifier, terms}
+import viper.silicon.state.terms.{Sort, Term, Trigger, Var}
 import viper.silicon.utils.ast.replaceVarsInExp
 import viper.silver.ast
 
